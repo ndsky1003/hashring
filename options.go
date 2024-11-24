@@ -1,25 +1,25 @@
 package hashring
 
-func Options[T any]() *options[T] {
-	return &options[T]{}
+func Options[T any]() *Option[T] {
+	return &Option[T]{}
 }
 
-type options[T any] struct {
+type Option[T any] struct {
 	replica_count *int
 	string_func   func(T) string
 }
 
-func (this *options[T]) SetReplicaCount(replicaCount int) *options[T] {
+func (this *Option[T]) SetReplicaCount(replicaCount int) *Option[T] {
 	this.replica_count = &replicaCount
 	return this
 }
 
-func (this *options[T]) SetStringFunc(stringFunc func(T) string) *options[T] {
+func (this *Option[T]) SetStringFunc(stringFunc func(T) string) *Option[T] {
 	this.string_func = stringFunc
 	return this
 }
 
-func (this *options[T]) merge(delta *options[T]) *options[T] {
+func (this *Option[T]) merge(delta *Option[T]) *Option[T] {
 	if delta == nil {
 		return this
 	}
@@ -32,7 +32,7 @@ func (this *options[T]) merge(delta *options[T]) *options[T] {
 	return this
 }
 
-func (this *options[T]) merges(opts ...*options[T]) *options[T] {
+func (this *Option[T]) merges(opts ...*Option[T]) *Option[T] {
 	for _, opt := range opts {
 		this.merge(opt)
 	}

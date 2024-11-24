@@ -1,7 +1,8 @@
 package hashring
 
 import (
-	"crypto/md5"
+	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 	"sort"
 	"sync"
@@ -9,44 +10,37 @@ import (
 
 // hash_ring 结构体
 type hash_ring[T any] struct {
-	mu            sync.RWMutex //protect under
-	hashMap       map[uint32]T
-	sortedHashes  []uint32
-	replica_count int
-	string_func   func(T) string
+	rwl          sync.RWMutex //protect under
+	hashMap      map[uint64]T
+	sortedHashes []uint64
+	opt          *Option[T]
 }
 
 // New 创建新的 HashRing
-func New[T any](opts ...*options[T]) *hash_ring[T] {
-	opt := Options[T]().merges(opts...)
-	if opt.replica_count == nil || *opt.replica_count == 0 {
-		panic("replica_count must be > 0")
-	}
-
-	if opt.string_func == nil {
-		opt.string_func = func(t T) string { return fmt.Sprintf("%v", t) }
-	}
+func New[T any](opts ...*Option[T]) *hash_ring[T] {
+	opt := Options[T]().
+		SetReplicaCount(3).
+		SetStringFunc(func(t T) string { return fmt.Sprintf("%v", t) }).
+		merges(opts...)
 
 	return &hash_ring[T]{
-		hashMap:       make(map[uint32]T),
-		replica_count: *opt.replica_count,
-		string_func:   opt.string_func,
+		hashMap: make(map[uint64]T),
+		opt:     opt,
 	}
 }
 
-func (this *hash_ring[T]) hash(key string) uint32 {
-	hash := md5.Sum([]byte(key))
-	v := uint32(hash[0])<<24 | uint32(hash[1])<<16 | uint32(hash[2])<<8 | uint32(hash[3])
-	return v
+func (this *hash_ring[T]) hash(key string) uint64 {
+	hash := sha256.Sum256([]byte(key))
+	return binary.BigEndian.Uint64(hash[:8])
 }
 
 // AddNode 添加节点
 func (this *hash_ring[T]) AddNode(node T) {
-	this.mu.Lock()
-	defer this.mu.Unlock()
+	this.rwl.Lock()
+	defer this.rwl.Unlock()
 
-	for i := 0; i < this.replica_count; i++ {
-		virtualNode := fmt.Sprintf("%s#%d", this.string_func(node), i)
+	for i := 0; i < *this.opt.replica_count; i++ {
+		virtualNode := fmt.Sprintf("%s#%d", this.opt.string_func(node), i)
 		hash := this.hash(virtualNode)
 		this.hashMap[hash] = node
 		this.sortedHashes = append(this.sortedHashes, hash)
@@ -58,11 +52,11 @@ func (this *hash_ring[T]) AddNode(node T) {
 
 // RemoveNode 移除节点
 func (this *hash_ring[T]) RemoveNode(node T) {
-	this.mu.Lock()
-	defer this.mu.Unlock()
+	this.rwl.Lock()
+	defer this.rwl.Unlock()
 
-	for i := 0; i < this.replica_count; i++ {
-		virtualNode := fmt.Sprintf("%s#%d", this.string_func(node), i)
+	for i := 0; i < *this.opt.replica_count; i++ {
+		virtualNode := fmt.Sprintf("%s#%d", this.opt.string_func(node), i)
 		hash := this.hash(virtualNode)
 		delete(this.hashMap, hash)
 
@@ -81,8 +75,8 @@ func (this *hash_ring[T]) RemoveNode(node T) {
 
 // GetNode 获取对应的节点
 func (this *hash_ring[T]) GetNode(key string) T {
-	this.mu.RLock()
-	defer this.mu.RUnlock()
+	this.rwl.RLock()
+	defer this.rwl.RUnlock()
 
 	if len(this.sortedHashes) == 0 {
 		return this.hashMap[0] //0值即可
